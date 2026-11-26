@@ -16,8 +16,6 @@ Then open http://127.0.0.1:6080/vnc.html.
 |---|---|---|
 | `LAB_DESKTOP` | `1` | `0` skips the desktop and just runs the command |
 | `LAB_VNC_PASSWORD` | random | VNC password (first 8 chars count). If unset, a random one is generated and only its first 4 characters are logged |
-| `LAB_BIND` | `127.0.0.1` | `0.0.0.0` exposes VNC/noVNC outside the container |
 | `LAB_GEOMETRY` | `1440x900` | screen size |
 
-Security: never publish port 6080 on a public interface. Set `LAB_BIND=0.0.0.0` only when the port is reachable
-solely through Tailscale or an SSH tunnel. Secrets are passed at run time, never baked into the image.
+Security: Xtigervnc always listens on the container loopback only (5901 never leaves the container). noVNC (websockify) listens on 0.0.0.0:6080 inside the container; publish it on the host loopback only (`-p 127.0.0.1:6080:6080`) and reach it over an ssh tunnel. The VNC password comes from `LAB_VNC_PASSWORD` or is generated, and is written to `/home/lab/.vnc/passwd-plain` (mode 0600, owner lab); it is never printed.

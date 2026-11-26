@@ -1,0 +1,2 @@
+# Pinned lab image (name@sha256:digest). Update by hand after a new image build; 'lanes up --image' overrides.
+ghcr.io/autoscansoftware/lab@sha256:efe97890b4501a054e3316a372ad40ddfa7167060f11c45153cd8485f778dd6c

@@ -43,7 +43,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER lab
 WORKDIR /home/lab
-ENV LAB_DESKTOP=1 LAB_BIND=127.0.0.1 DISPLAY=:1
+ENV LAB_DESKTOP=1 DISPLAY=:1
 EXPOSE 6080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]
