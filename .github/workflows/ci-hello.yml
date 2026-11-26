@@ -1,0 +1,18 @@
+name: ci-hello
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "examples/hello/**"
+      - ".github/workflows/os-matrix.yml"
+      - ".github/workflows/ci-hello.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hello:
+    uses: ./.github/workflows/os-matrix.yml
+    with:
+      working-directory: examples/hello
+      test: python hello.py && python -m unittest -v
