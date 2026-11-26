@@ -27,4 +27,4 @@ jobs:
       - name: zizmor (pinned)
         run: |
           python -m pip install --quiet zizmor==1.33.1
-          zizmor --format plain .github/workflows
+          zizmor --config .github/zizmor.yml --format plain .github/workflows
