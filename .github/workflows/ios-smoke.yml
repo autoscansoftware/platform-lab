@@ -20,7 +20,7 @@ jobs:
       - name: Create and boot an iPhone simulator
         run: |
           RUNTIME=$(xcrun simctl list runtimes -j | python3 -c "import json,sys; r=[x for x in json.load(sys.stdin)['runtimes'] if x.get('isAvailable') and x['identifier'].split('.')[-1].startswith('iOS')]; print(r[-1]['identifier'])")
-          DEVTYPE=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys; d=[x for x in json.load(sys.stdin)['devicetypes'] if 'iPhone' in x['name']]; print(d[-1]['identifier'])")
+          DEVTYPE=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys; d=[x for x in json.load(sys.stdin)['devicetypes'] if x['name'].startswith('iPhone 1') and 'Pro' not in x['name'] and 'Plus' not in x['name'] and 'Max' not in x['name'] and 'mini' not in x['name']]; print(d[-1]['identifier'])")
           echo "runtime=$RUNTIME devicetype=$DEVTYPE"
           UDID=$(xcrun simctl create lab-iphone "$DEVTYPE" "$RUNTIME")
           xcrun simctl boot "$UDID"
