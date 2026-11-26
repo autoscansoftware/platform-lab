@@ -2,6 +2,8 @@ name: android-smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches: [pl-5]
   schedule:
     - cron: "17 4 * * 1"
 
