@@ -15,6 +15,7 @@ JSON file at `$LABCTL_CONFIG` (default `~/.labctl.json`, keep it outside the rep
 ## Verbs
 
 - `lanes up <n> [--image IMG] [--gpu]`: start lane-1..n; CPU and RAM split evenly, GPU shared with `--gpu`. Arms the self-destruct timer on the pod.
+- Default image is the digest-pinned reference in `labctl/IMAGE` (update by hand after a new image build); `--image` overrides it. Lane containers carry the label `labctl.lane=1`, which all lane commands match on.
 - `lanes ls`, `lanes down <name>|--all`
 - `run <lane> -- <cmd>`: nohup inside the container, prints a job id. `wait <job>`, `logs <job> -n N`
 - `push <local> <rel>`, `pull <rel> <local>`: tar over ssh, byte and file count verified. Remote paths are relative to `remote_root`; absolute paths and `..` are refused.
@@ -23,7 +24,9 @@ JSON file at `$LABCTL_CONFIG` (default `~/.labctl.json`, keep it outside the rep
 
 ## Self-destruct
 
-A timer on the pod stops all lanes at the deadline. If `destroy_cmd` is set in the config, it also leaves a
+A timer on the pod (under `systemd-run` when available, else `nohup`) stops all LANES at the deadline.
+**It does not stop or destroy the pod: the pod keeps billing until the operator destroys it.**
+`status` and `extend` check the timer process is alive and say `TIMER NOT RUNNING` otherwise. If `destroy_cmd` is set in the config, it also leaves a
 `DESTROY_MARKER` file in the remote root for the operator's watcher to act on.
 
 ## Tests

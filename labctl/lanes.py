@@ -2,10 +2,25 @@
 import re
 import shlex
 import time
+from pathlib import Path
 
 import pod as P
 
-DEFAULT_IMAGE = "ghcr.io/autoscansoftware/lab:latest"
+IMAGE_FILE = Path(__file__).resolve().parent / "IMAGE"
+LANE_LABEL = "labctl.lane=1"
+LANE_FILTER = f"--filter label={LANE_LABEL}"
+
+
+def read_default_image(path=IMAGE_FILE):
+    """The pinned image (name@sha256:digest) kept in labctl/IMAGE; updated by hand, `--image` overrides it."""
+    for line in Path(path).read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    raise P.LabError(f"no image reference in {path}")
+
+
+DEFAULT_IMAGE = read_default_image()
 NOVNC_PORT = 6080          # inside the container
 HOST_PORT_BASE = 6080      # lane N is published on 127.0.0.1:(base+N) on the pod
 MAX_LANES = 16
@@ -52,7 +67,7 @@ def build_up(cfg, i, image, cpus, mem_mb, gpu):
         raise P.LabError(f"bad image reference {image!r}")
     name = lane_name(i)
     work = f"{cfg['remote_root']}/lanes/{name}"
-    argv = ["docker", "run", "-d", "--name", name, "--restart", "no", "--cpus", str(cpus), "--memory", f"{mem_mb}m",
+    argv = ["docker", "run", "-d", "--name", name, "--label", LANE_LABEL, "--restart", "no", "--cpus", str(cpus), "--memory", f"{mem_mb}m",
             "-v", f"{work}:/work", "-w", "/work", "-p", f"127.0.0.1:{host_port(name)}:{NOVNC_PORT}"]
     if gpu:
         argv += ["--gpus", "all"]
@@ -89,15 +104,19 @@ def timer_script(cfg):
     r = shlex.quote(cfg["remote_root"])
     marker = f"touch {r}/DESTROY_MARKER; " if cfg.get("destroy_cmd") else ""
     return (f'while [ "$(date +%s)" -lt "$(cat {r}/deadline)" ]; do sleep 20; done; '
-            f"docker ps -aq --filter name=lane- | xargs -r docker stop; {marker}rm -f {r}/timer.pid")
+            f"docker ps -aq {LANE_FILTER} | xargs -r docker stop; {marker}rm -f {r}/timer.pid")
 
 
 def build_arm(cfg, seconds):
+    """Arm the timer: under systemd-run when available, else nohup. The pid file is what status/extend check."""
     r = shlex.quote(cfg["remote_root"])
     inner = shlex.quote(timer_script(cfg))
+    start = (f"if command -v systemd-run >/dev/null 2>&1 && systemd-run --quiet --collect --unit labctl-timer sh -c {inner} 2>/dev/null; "
+             f"then systemctl show -p MainPID --value labctl-timer > {r}/timer.pid; "
+             f"else nohup sh -c {inner} > /dev/null 2>&1 < /dev/null & echo $! > {r}/timer.pid; fi")
     return (f"mkdir -p {r} && echo $(( $(date +%s) + {int(seconds)} )) > {r}/deadline && "
-            f'if ! kill -0 "$(cat {r}/timer.pid 2>/dev/null)" 2>/dev/null; then '
-            f"rm -f {r}/DESTROY_MARKER; nohup sh -c {inner} > /dev/null 2>&1 < /dev/null & echo $! > {r}/timer.pid; fi; echo armed")
+            f'if ! kill -0 "$(cat {r}/timer.pid 2>/dev/null)" 2>/dev/null; then rm -f {r}/DESTROY_MARKER; {start}; fi; '
+            f'sleep 1; kill -0 "$(cat {r}/timer.pid 2>/dev/null)" 2>/dev/null && echo armed || {{ echo not-running; exit 5; }}')
 
 
 def build_extend(cfg, hours):
@@ -107,7 +126,8 @@ def build_extend(cfg, hours):
         raise P.LabError(f"extend refused: {h} h (allowed 0 < h <= {P.MAX_EXTEND_H})")
     r = shlex.quote(cfg["remote_root"])
     add, cap = int(round(h * 3600)), int(P.MAX_EXTEND_H * 3600)
-    return (f"test -s {r}/deadline || {{ echo no-timer; exit 3; }}; now=$(date +%s); d=$(cat {r}/deadline); "
+    return (f"test -s {r}/deadline || {{ echo no-timer; exit 3; }}; "
+            f'kill -0 "$(cat {r}/timer.pid 2>/dev/null)" 2>/dev/null || {{ echo timer-dead; exit 4; }}; now=$(date +%s); d=$(cat {r}/deadline); '
             f"rem=$((d-now)); [ $rem -lt 0 ] && rem=0; new=$((rem+{add})); [ $new -gt {cap} ] && new={cap}; "
             f"[ $new -lt $rem ] && new=$rem; echo $((now+new)) > {r}/deadline; echo $new")
 
@@ -116,10 +136,11 @@ def build_status(cfg):
     r = shlex.quote(cfg["remote_root"])
     return ("echo '#gpu'; nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader 2>/dev/null; "
             f"echo '#disk'; df -h {r} 2>/dev/null | tail -n 1; "
-            "echo '#lanes'; docker ps -a --filter name=lane- --format '{{.Names}} {{.Status}}' 2>/dev/null; "
+            f"echo '#lanes'; docker ps -a {LANE_FILTER} --format '{{.Names}} {{.Status}}' 2>/dev/null; "
             f"echo '#jobs'; for e in {r}/lanes/*/.jobs/*; do [ -d \"$e\" ] || continue; "
             "if [ -f \"$e/exit\" ]; then echo \"$(basename $e) exit $(cat $e/exit)\"; else echo \"$(basename $e) running\"; fi; done; "
-            f"echo '#deadline'; d=$(cat {r}/deadline 2>/dev/null); [ -n \"$d\" ] && echo $((d-$(date +%s)))")
+            f"echo '#deadline'; d=$(cat {r}/deadline 2>/dev/null); [ -n \"$d\" ] && echo $((d-$(date +%s))); "
+            f"echo '#timer'; if kill -0 \"$(cat {r}/timer.pid 2>/dev/null)\" 2>/dev/null; then echo alive; else echo dead; fi")
 
 
 def parse_status(text):
@@ -134,6 +155,7 @@ def parse_status(text):
     if sec.get("deadline") and re.fullmatch(r"-?\d+", sec["deadline"][0]):
         left = max(0, int(sec["deadline"][0])) / 60.0
     sec["minutes_left"] = left
+    sec["timer_alive"] = bool(sec.get("timer")) and sec["timer"][0] == "alive"
     return sec
 
 
@@ -152,19 +174,19 @@ def up(runner, cfg, n, image, gpu, out=print):
     secs = int(cfg["self_destruct_hours"] * 3600)
     rc, _ = runner.text(build_arm(cfg, secs))
     if rc != 0:
-        raise P.LabError("lanes started but the self-destruct timer could not be armed: run 'lanes down' now")
-    out(f"self-destruct armed: all lanes stop in {cfg['self_destruct_hours']:g} h")
+        raise P.LabError("lanes started but the self-destruct timer is NOT RUNNING: run 'lanes down' now")
+    out(f"self-destruct armed: all lanes stop in {cfg['self_destruct_hours']:g} h (the pod keeps billing until you destroy it)")
 
 
 def ls(runner, cfg, out=print):
-    rc, txt = runner.text("docker ps -a --filter name=lane- --format '{{.Names}}\t{{.Status}}\t{{.Image}}'")
+    rc, txt = runner.text(f"docker ps -a {LANE_FILTER} --format '{{{{.Names}}}}	{{{{.Status}}}}	{{{{.Image}}}}'")
     out(txt.strip() or "no lanes")
 
 
 def down(runner, cfg, name=None, all_=False, out=print):
     if bool(name) == bool(all_):
         raise P.LabError("give a lane name or --all")
-    cmd = ("docker ps -aq --filter name=lane- | xargs -r docker rm -f" if all_
+    cmd = (f"docker ps -aq {LANE_FILTER} | xargs -r docker rm -f" if all_
            else shlex.join(["docker", "rm", "-f", valid_lane(name)]))
     rc, _ = runner.text(cmd)
     out(f"down: {'all lanes' if all_ else name} (exit {rc})")
@@ -201,12 +223,19 @@ def status(runner, cfg, out=print):
     for k in ("gpu", "disk", "lanes", "jobs"):
         out(f"{k}: " + ("; ".join(sec.get(k, [])) or "-"))
     m = sec["minutes_left"]
-    out("self-destruct in: " + ("no timer" if m is None else f"{m:.0f} min"))
+    if m is None:
+        out("self-destruct in: no timer")
+    elif not sec["timer_alive"]:
+        out(f"self-destruct in: {m:.0f} min -- TIMER NOT RUNNING: lanes will NOT stop on their own")
+    else:
+        out(f"self-destruct in: {m:.0f} min (timer running; stops LANES only, the pod keeps billing until you destroy it)")
     return sec
 
 
 def extend(runner, cfg, hours, out=print):
     rc, txt = runner.text(build_extend(cfg, hours))
+    if txt.strip() == "timer-dead":
+        raise P.LabError("TIMER NOT RUNNING: nothing to extend, the lanes will not stop on their own")
     if rc != 0 or not txt.strip().isdigit():
         raise P.LabError("extend refused: no self-destruct timer found on the pod")
     out(f"self-destruct now in {int(txt) / 60:.0f} min")
