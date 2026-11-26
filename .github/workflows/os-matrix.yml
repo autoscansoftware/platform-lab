@@ -1,0 +1,62 @@
+name: os-matrix
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        type: string
+        default: "."
+      python-version:
+        type: string
+        default: "3.12"
+      node-version:
+        type: string
+        default: ""
+      install:
+        type: string
+        default: ""
+      test:
+        type: string
+        required: true
+      os-list:
+        type: string
+        default: '["ubuntu-latest","windows-latest","macos-latest"]'
+permissions:
+  contents: read
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os-list) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - uses: actions/setup-node@v4
+        if: inputs.node-version != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install
+        if: inputs.install != ''
+        env:
+          CMD: ${{ inputs.install }}
+        run: eval "$CMD"
+      - name: Test
+        env:
+          CMD: ${{ inputs.test }}
+        run: eval "$CMD" 2>&1 | tee test.log; exit "${PIPESTATUS[0]}"
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ runner.os }}
+          path: ${{ inputs.working-directory }}/test.log
+          if-no-files-found: ignore

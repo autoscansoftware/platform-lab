@@ -1,0 +1,37 @@
+name: ios-smoke
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+  pull_request:
+    paths:
+      - ".github/workflows/ios-smoke.yml"
+      - "examples/swift-hello/**"
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: List runtimes
+        run: xcrun simctl list runtimes
+      - name: Create and boot an iPhone simulator
+        run: |
+          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c "import json,sys; r=[x for x in json.load(sys.stdin)['runtimes'] if x.get('isAvailable') and x['identifier'].split('.')[-1].startswith('iOS')]; print(r[-1]['identifier'])")
+          DEVTYPE=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys; d=[x for x in json.load(sys.stdin)['devicetypes'] if x['name'].startswith('iPhone 1') and 'Pro' not in x['name'] and 'Plus' not in x['name'] and 'Max' not in x['name'] and 'mini' not in x['name']]; print(d[-1]['identifier'])")
+          echo "runtime=$RUNTIME devicetype=$DEVTYPE"
+          UDID=$(xcrun simctl create lab-iphone "$DEVTYPE" "$RUNTIME")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices booted
+      - name: Screenshot
+        run: xcrun simctl io booted screenshot shot.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshot
+          path: shot.png
+      - name: Swift package tests
+        working-directory: examples/swift-hello
+        run: swift test
