@@ -11,7 +11,7 @@
 | `node-version` | empty | set to install Node |
 | `install` | empty | optional shell command (bash) |
 | `test` | required | shell command (bash) |
-| `os-list` | `["ubuntu-latest","windows-latest","macos-14"]` | JSON array of runners |
+| `os-list` | `["ubuntu-latest","windows-latest","macos-latest"]` | JSON array of runners |
 
 ## Calling it from a private product repo
 ```yaml

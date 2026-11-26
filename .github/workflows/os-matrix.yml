@@ -19,7 +19,7 @@ on:
         required: true
       os-list:
         type: string
-        default: '["ubuntu-latest","windows-latest","macos-14"]'
+        default: '["ubuntu-latest","windows-latest","macos-latest"]'
 permissions:
   contents: read
 jobs:
